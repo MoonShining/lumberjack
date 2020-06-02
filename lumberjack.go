@@ -111,8 +111,10 @@ type Logger struct {
 	file *os.File
 	mu   sync.Mutex
 
-	millCh    chan bool
-	startMill sync.Once
+	millCh      chan bool
+	startMill   sync.Once
+	wg			sync.WaitGroup
+	done		chan struct{}
 }
 
 var (
@@ -165,7 +167,14 @@ func (l *Logger) Write(p []byte) (n int, err error) {
 func (l *Logger) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.close()
+	err := l.close()
+
+	if l.done != nil {
+		close(l.done)
+		l.done = nil
+	}
+	l.wg.Wait()
+	return err
 }
 
 // close closes the file if it is open.
@@ -376,9 +385,15 @@ func (l *Logger) millRunOnce() error {
 // millRun runs in a goroutine to manage post-rotation compression and removal
 // of old log files.
 func (l *Logger) millRun() {
-	for _ = range l.millCh {
-		// what am I going to do, log this?
-		_ = l.millRunOnce()
+	defer l.wg.Done()
+	for {
+		select {
+		case <-l.done:
+			return
+		case <-l.millCh:
+			// what am I going to do, log this?
+			_ = l.millRunOnce()
+		}
 	}
 }
 
@@ -386,7 +401,9 @@ func (l *Logger) millRun() {
 // starting the mill goroutine if necessary.
 func (l *Logger) mill() {
 	l.startMill.Do(func() {
+		l.wg.Add(1)
 		l.millCh = make(chan bool, 1)
+		l.done = make(chan struct{})
 		go l.millRun()
 	})
 	select {

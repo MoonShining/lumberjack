@@ -688,6 +688,46 @@ func TestCompressOnResume(t *testing.T) {
 	fileCount(dir, 2, t)
 }
 
+func TestCloseWait(t *testing.T) {
+	currentTime = fakeTime
+	megabyte = 1
+	dir := makeTempDir("TestMaxBackups", t)
+	defer os.RemoveAll(dir)
+
+	filename := logFile(dir)
+	l := &Logger{
+		Filename:   filename,
+		MaxSize:    10,
+		MaxBackups: 1,
+	}
+	b := []byte("boo!")
+	n, err := l.Write(b)
+	isNil(err, t)
+	equals(len(b), n, t)
+
+	existsWithContent(filename, b, t)
+	fileCount(dir, 1, t)
+
+	newFakeTime()
+
+	// this will put us over the max
+	b2 := []byte("foooooo!")
+	n, err = l.Write(b2)
+	isNil(err, t)
+	equals(len(b2), n, t)
+
+	// this will use the new fake time
+	secondFilename := backupFile(dir)
+	existsWithContent(secondFilename, b, t)
+
+	// make sure the old file still exists with the same content.
+	existsWithContent(filename, b2, t)
+
+	fileCount(dir, 2, t)
+
+	l.Close()
+}
+
 func TestJson(t *testing.T) {
 	data := []byte(`
 {
